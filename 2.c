@@ -7,36 +7,52 @@
 #include <unistd.h>
 
 
+int MAXFD = 4096;
 int MAXFDS = 50;
 typedef int16_t sample;
 int BUFLEN = 4096/sizeof(sample);
 
-struct fdbuf {
-	int len;
-	sample buf[BUFLEN];
-}
+struct fdpipe {
+	char type;
+	int pipefd;
+};
 
 
 int
 main(int argc, char **argv)
 {
-	int maxfd = sysconf(_SC_OPEN_MAX);
-	if (maxfd == -1)
+	int sysmaxfd = sysconf(_SC_OPEN_MAX);
+	if (sysmaxfd == -1)
 		die("2: sysconf(_SC_OPEN_MAX): %s", strerror(errno));
-	else if (maxfd < 0)
+	else if (sysmaxfd < 0)
 		die("2: huh???");
-	struct pollfd pfds[MAXFDS*5];  // parent<>outside parent<>left parent<>right
-	pfds[0] = { .fd = 0, .events = POLLIN };
-	pfds[1] = { .fd = 1, .events = POLLOUT };
-	int fdslen = 2;
-	for (int fd=3; fd<maxfd; fd++) {
+	int maxfd = (sysmaxfd > MAXFD) ? MAXFD : sysmaxfd;
+
+	struct pollfd pfds[MAXFDS*3];  // parent<>outside parent<>left parent<>right
+	struct fdpipe fdpipes[MAXFDS];
+	int fdslen = 0;
+	for (int fd=0; fd<maxfd; fd++) {
+		if (fd == STDERR_FILENO)
+			continue;
 		int flags = fcntl(fd, F_GETFL);
 		if (flags != -1) {
-			pfds[fdslen++] = { .fd = fd, .events = POLLIN };
-			if (fdslen > MAXFDS)
+			if ((flags & O_ACCMODE) == O_RDWR)
+				die("2: files opened for both reading and writing are not supported "
+					"(fd %d)", fd);
+			char type = ((flags & O_ACCMODE) == O_RDONLY) ? 'r' : 'w';
+			if ((type == 'r') && (fcntl(fd, F_SETFL, flags | O_NONBLOCK) == -1))
+				die("2: fcntl %d nonblock: %s", fd, strerror(errno));
+			pfds[fdslen] = { .fd = fd, .events = POLLIN };
+			for (int ch=0; ch<2; ch++) {
+				int p[2];
+				if (pipe(p))
+					die("2: pipe: %s", strerror(errno));
+				pfds[(1+ch)*MAXFDS+fdslen] = { .fd = p[(type=='w')], .events = POLLIN };
+				if (type == 'r')
+			}
+			fdpipes[fdslen] = ;
+			if (++fdslen > MAXFDS)
 				die("2: too many fds");
-			if (fcntl(fd, F_SETFL, flags | O_NONBLOCK) == -1)
-				die("2: fcntl F_SETFL: %s", strerror(errno));
 		}
 	}
 

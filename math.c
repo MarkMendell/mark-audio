@@ -43,7 +43,8 @@ struct token TOKENS[] = {
 	{ "rnd", { .f1 = round }, 1 },
 	{ "+", { .f2 = add }, 2 },
 	{ "*", { .f2 = mult }, 2 },
-	{ "/", { .f2 = div_ }, 2 }
+	{ "/", { .f2 = div_ }, 2 },
+	{ "%", { .f2 = fmod }, 2 }
 };
 
 

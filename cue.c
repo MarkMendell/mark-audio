@@ -7,14 +7,14 @@
 #include <string.h>
 
 
-unsigned int BUFLEN = 4096;
 typedef int16_t sample;
+unsigned int BUFLEN = 4096/sizeof(sample);
 struct inputnode {
 	char *line;
 	FILE *pipe;
-	struct inputnode *prev;
 	struct inputnode *next;
 };
+
 
 /* Clean up all elements of the input list pointed to by head. */
 void
@@ -30,9 +30,8 @@ freeinputlist(struct inputnode *head)
 	free(head);
 }
 
-/* Free the input list head (if not NULL) and line, then printf the rest of the
- * args to stderr and exit with nonzero status. */
-// TODO: swap comment order
+/* printf args 3+ to stderr, then free the input list head (if not NULL) and
+ * line and exit with nonzero status. */
 void
 die(struct inputnode *head, char *line, char *errfmt, ...)
 {
@@ -48,26 +47,20 @@ die(struct inputnode *head, char *line, char *errfmt, ...)
 }
 
 /* Writes the sum of each sample read across the list of inputs provided until
- * writeleft*channels many samples have been written. If writeleft is -1,
- * samples are written until all inputs have reached EOF. As inputs reach EOF,
- * they are removed from the list. If all inputs reach EOF before count_end many
- * samples have been written, 0 is written for the remaining count. If the
- * number of samples read is not a multiple of channels, an error message is
- * shown. */
+ * writeleft many samples have been written. If writeleft is -1, samples are
+ * written until all inputs have reached EOF. As inputs reach EOF, they are
+ * removed from the list. If all inputs reach EOF before count_end many samples
+ * have been written, 0 is written for the remaining count. */
 void
-writesummedinputsordie(struct inputnode **headptr, int writeleft,
-	unsigned int channels, char *line)
+writesummedinputsordie(struct inputnode **headptr, int writeleft, char *line)
 {
-	unsigned int buflen = BUFLEN - 1;
-	while (++buflen % channels);
-	sample readbuf[buflen];
-	sample sumbuf[buflen];
-	// Output sum of inputs in increments of buflen
+	sample readbuf[BUFLEN], sumbuf[BUFLEN];
+	// Output sum of inputs in increments of BUFLEN
 	while (writeleft) {
 		struct inputnode *input = *headptr;
-		memset(sumbuf, 0, buflen * sizeof(sample));
-		size_t writec = (writeleft == -1) ? buflen :
-			(writeleft*channels > buflen) ? buflen : writeleft*channels;
+		struct inputnode *prev;
+		memset(sumbuf, 0, BUFLEN * sizeof(sample));
+		size_t writec = ((writeleft==-1)||(writeleft>BUFLEN)) ? BUFLEN : writeleft;
 		size_t maxread = 0;
 		// Add writec samples from input to sumbuf, then move to next input
 		while (input->next != NULL) {
@@ -77,9 +70,6 @@ writesummedinputsordie(struct inputnode **headptr, int writeleft,
 					strerror(errno));
 			// End of input, remove it from list
 			if (feof(input->pipe)) {
-				if (readc % channels)
-					fprintf(stderr, "cue: missing channel samples from '%s'\n",
-						input->line);
 				int status = pclose(input->pipe);
 				if (status == -1)
 					die(*headptr, line, "cue: pclose pipe for '%s': %s", input->line,
@@ -87,15 +77,14 @@ writesummedinputsordie(struct inputnode **headptr, int writeleft,
 				if (status)
 					fprintf(stderr, "cue: '%s' exited with status %d\n", input->line,
 						status);
-				if (input == *headptr) {
+				if (input == *headptr)
 					*headptr = input->next;
-				} else {
-					input->prev->next = input->next;
-					input->next->prev = input->prev;
-				}
+				else
+					prev->next = input->next;
 				free(input->line);
 				free(input);
-			}
+			} else
+				prev = input;
 			if (readc > maxread)
 				maxread = readc;
 			for (int i=0; i<readc; i++)
@@ -116,13 +105,7 @@ writesummedinputsordie(struct inputnode **headptr, int writeleft,
 int
 main(int argc, char **argv)
 {
-	if (argc != 2)
-		die(NULL, NULL, "usage: cue channels");
-	unsigned int channels = atoi(argv[1]);
-	if (channels < 1)
-		die(NULL, NULL, "cue: channels must be positive integer");
 	setbuf(stdout, NULL);
-
 	struct inputnode *head = malloc(sizeof(struct inputnode));  // list of inputs
 	if (head == NULL)
 		die(NULL, NULL, "cue: malloc head: %s", strerror(errno));
@@ -148,7 +131,7 @@ main(int argc, char **argv)
 			die(head, line, "cue: cue '%s' out of order", line);
 
 		// Write up to the next cue index
-		writesummedinputsordie(&head, cuei - samplei, channels, line);
+		writesummedinputsordie(&head, cuei - samplei, line);
 		samplei = cuei;
 		if (chari++ == len)  // no command
 			continue;
@@ -163,7 +146,6 @@ main(int argc, char **argv)
 			die(oldhead, line, "cue: malloc line '%s': %s", line, errmsg);
 		}
 		head->next = oldhead;
-		oldhead->prev = head;
 		strcpy(head->line, line);
 		errno = 0;
 		if ((head->pipe = popen(&line[chari], "r")) == NULL) {
@@ -173,11 +155,11 @@ main(int argc, char **argv)
 			die(oldhead, line, "cue: popen for '%s': %s", line, errmsg);
 		}
 	}
-
-	// Write the remaining input and clean up
 	if (ferror(stdin))
 		die(head, line, "cue: getline: %s", strerror(errno));
-	writesummedinputsordie(&head, -1, channels, line);
+
+	// Write the remaining input and clean up
+	writesummedinputsordie(&head, -1, line);
 	freeinputlist(head);
 	free(line);
 }

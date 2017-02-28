@@ -55,13 +55,9 @@ writeproductordie(double multiplier, int writeleft, unsigned int channels,
 int 
 main(int argc, char *argv[])
 {
-	if ((argc < 2) || (argc > 3))
-		die(NULL, NULL, "usage: gain channels [multiplier]");
-	unsigned int channels = atoi(argv[1]);
-	if (channels < 1)
-		die(NULL, NULL, "gain: channels must be positive integer");
+	setbuf(stdout, NULL);
 	double multiplier = 1.0;
-	if ((argc == 3) &&
+	if ((argc > 1) &&
 			(((multiplier = strtod(argv[2], NULL)) < 0.0f) || (errno == EINVAL)))
     die(NULL, NULL, "gain: multiplier must be nonnegative number");
 	FILE *cmd;
@@ -70,7 +66,6 @@ main(int argc, char *argv[])
 			die(NULL, NULL, "gain: fopen /dev/null");
 	} else if ((cmd = fdopen(3, "r")) == NULL)
 		die(NULL, NULL, "gain: fdopen 3");
-	setbuf(stdout, NULL);
   
 	unsigned int samplei = 0;  // count of samples written
 	char *line = NULL;  // input command
@@ -102,10 +97,10 @@ main(int argc, char *argv[])
 		if (((multiplier = strtod(&line[chari], NULL)) < 0.0f) || (errno == EINVAL))
 			die(cmd, line, "gain: multiplier for '%s' not a nonnegative number", line);
 	}
-
-	// Write remaining input
 	if (ferror(cmd))
 		die(cmd, line, "gain: getline: %s", strerror(errno));
+
+	// Write remaining input and cleanup
 	writeproductordie(multiplier, -1, channels, line, cmd);
 	fclose(cmd);
 	free(line);
