@@ -6,10 +6,10 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/types.h>
+#include <unistd.h>
 
-
-size_t BUFLEN = 4096;
 typedef int16_t sample;
+int BUFLEN = 4096/sizeof(sample);
 
 
 void 
@@ -27,39 +27,36 @@ die(FILE *cmd, char *line, char *errfmt, ...)
 }
 
 void
-writeproductordie(double multiplier, int writeleft, unsigned int channels,
-	char *line, FILE *cmd)
+writeproductordie(double multiplier, int writeleft, char *line, FILE *cmd)
 {
-	unsigned int buflen = BUFLEN - 1;
-	while (++buflen % channels)
-		;
-  sample buf[buflen];
+  sample buf[BUFLEN];
 	while (writeleft) {
-		size_t writec = (writec == -1) ? buflen :
-			(writeleft*channels > buflen) ? buflen : writeleft*channels;
-		size_t read = fread(buf, sizeof(sample), writec, stdin);
-		if (ferror(stdin))
-			die(cmd, line, "gain: fread: %s", strerror(errno));
-    for (size_t i=0; i<read; i++)
+		size_t goal = ((writeleft==-1) || (writeleft>BUFLEN)) ? BUFLEN : writeleft;
+		ssize_t got;
+		do got = read(0, buf, goal); while ((got == -1) && (errno == EINTR));
+		if (got == -1)
+			die(cmd, line, "gain: read: %s", strerror(errno));
+    for (size_t i=0; i<got; i++)
       buf[i] = (sample)(((double)buf[i]) * multiplier);
-    fwrite(buf, sizeof(sample), read, stdout);
+    fwrite(buf, 1, got, stdout);
 		if (ferror(stdout))
 			die(cmd, line, "gain: fwrite: %s", strerror(errno));
-		if (feof(stdin))
+		if (!got)
 			break;
 		if (writeleft != -1)
-			writeleft -= writec;
+			writeleft -= got;
   }
 }
 
 int 
-main(int argc, char *argv[])
+main(int argc, char **argv)
 {
 	setbuf(stdout, NULL);
 	double multiplier = 1.0;
-	if ((argc > 1) &&
-			(((multiplier = strtod(argv[2], NULL)) < 0.0f) || (errno == EINVAL)))
-    die(NULL, NULL, "gain: multiplier must be nonnegative number");
+	char *endptr;
+	if ((argc > 1) && (((multiplier = strtod(argv[1], &endptr)) < 0.0) ||
+			(!strlen(argv[1])) || (*endptr != '\0')))
+		die(NULL, NULL, "gain: multiplier must be nonnegative number");
 	FILE *cmd;
 	if (fcntl(3, F_GETFD) == -1) {
 		if ((cmd = fopen("/dev/null", "r")) == NULL)
@@ -88,7 +85,7 @@ main(int argc, char *argv[])
 			die(cmd, line, "gain: command '%s' out of order", line);
 
 		// Write up to the next cue index
-		writeproductordie(multiplier, cuei - samplei, channels, line, cmd);
+		writeproductordie(multiplier, cuei - samplei, line, cmd);
 		samplei = cuei;
 		if (chari++ == len)  // no command
 			continue;
@@ -101,7 +98,7 @@ main(int argc, char *argv[])
 		die(cmd, line, "gain: getline: %s", strerror(errno));
 
 	// Write remaining input and cleanup
-	writeproductordie(multiplier, -1, channels, line, cmd);
+	writeproductordie(multiplier, -1, line, cmd);
 	fclose(cmd);
 	free(line);
 }

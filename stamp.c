@@ -9,7 +9,7 @@
 #include <unistd.h>
 
 
-int DELAY = 10;  // milliseconds
+int DELAY = 2;  // milliseconds
 int SAMPLERATE = 44100;
 int BUFLEN = 4096;
 

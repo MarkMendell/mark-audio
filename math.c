@@ -19,6 +19,7 @@ die(char *errfmt, ...)
 }
 
 double add(double a, double b) { return a + b; }
+double sub(double a, double b) { return a - b; }
 double div_(double a, double b) {
 	if (b == 0)
 		die("math: div by 0");
@@ -42,6 +43,7 @@ struct token TOKENS[] = {
 	{ "pow", { .f2 = pow }, 2 },
 	{ "rnd", { .f1 = round }, 1 },
 	{ "+", { .f2 = add }, 2 },
+	{ "-", { .f2 = sub }, 2 },
 	{ "*", { .f2 = mult }, 2 },
 	{ "/", { .f2 = div_ }, 2 },
 	{ "%", { .f2 = fmod }, 2 }
@@ -59,8 +61,8 @@ main(int argc, char **argv)
 	int len = 0;
 	for (int argi = 1+truncate; argi<argc; argi++) {
 		int found = 0;
-		// Starting with digits or - ==> parse as a double
-		if (isdigit(argv[argi][0]) || (argv[argi][0] == '-')) {
+		// Starting with digits or - ==> parse as a double (except for '-')
+		if (isdigit(argv[argi][0]) || ((argv[argi][0] == '-') && (argv[argi][1]))) {
 			char *endptr;
 			errno = 0;
 			if ((stack[len++] = strtod(argv[argi], &endptr)) == 0) {
