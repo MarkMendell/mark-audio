@@ -31,26 +31,30 @@ void
 writeproductordie(double gain, unsigned long writeleft, char *line, FILE *cmd)
 {
   sample buf[BUFLEN];
+	int off = 0;
+	size_t bytelen = BUFLEN * sizeof(sample);
 	while (writeleft) {
-		size_t goal = (writeleft>BUFLEN) ? BUFLEN : writeleft;
+		size_t goal = (writeleft>bytelen) ? bytelen : writeleft;
 		ssize_t got;
-		do got = read(0, buf, goal); while ((got == -1) && (errno == EINTR));
+		do got = read(0, (char*)buf+off, goal)+off; while ((got == -1) && (errno == EINTR));
 		if (got == -1)
 			die(cmd, line, "gain: read: %s", strerror(errno));
-    for (size_t i=0; i<got; i++)
+    for (size_t i=0; i<got/sizeof(sample); i++)
       buf[i] = (sample)(((double)buf[i]) * gain);
-    fwrite(buf, 1, got, stdout);
+    fwrite(buf, sizeof(sample), got/sizeof(sample), stdout);
 		if (ferror(stdout))
 			die(cmd, line, "gain: fwrite: %s", strerror(errno));
 		if (!got)
 			break;
 		if (writeleft != UINT_MAX)
-			writeleft -= got;
+			writeleft -= got/sizeof(sample);
+		off = got % sizeof(sample);
+		memmove(buf, buf+(got/sizeof(sample)), off);
   }
 }
 
 double
-parsegainordie(char *s, FILE *cmd, char *line)
+parsegain(char *s, FILE *cmd, char *line)
 {
 	char *endptr;
 	double gain = (errno=0, strtod(s, &endptr));
@@ -67,14 +71,14 @@ main(int argc, char **argv)
 	setbuf(stdout, NULL);
 	double gain = 1.0;
 	if (argc > 1)
-		gain = parsegainordie(argv[1], NULL, NULL)
+		gain = parsegain(argv[1], NULL, NULL);
 	FILE *cmd;
 	if (fcntl(3, F_GETFD) == -1) {
 		if ((cmd = fopen("/dev/null", "r")) == NULL)
 			die(NULL, NULL, "gain: fopen /dev/null");
 	} else if ((cmd = fdopen(3, "r")) == NULL)
 		die(NULL, NULL, "gain: fdopen 3");
-  
+
 	unsigned long samplei = 0;  // count of samples written
 	char *line = NULL;  // input command
 	ssize_t len;  // length of input command
@@ -96,17 +100,17 @@ main(int argc, char **argv)
 		// Write up to the next cue index
 		writeproductordie(gain, cuei - samplei, line, cmd);
 		samplei = cuei;
-		if ((cmd++ - line) == len)  // no command
+		if ((gainstr++ - line) == len)  // no command
 			continue;
 
 		// Parse next gain
-		gain = parsegainordie(gainstr, cmd, line);
+		gain = parsegain(gainstr, cmd, line);
 	}
 	if (ferror(cmd))
 		die(cmd, line, "gain: getline: %s", strerror(errno));
 
 	// Write remaining input and cleanup
-	writeproductordie(gain, UINT_MAX, line, cmd);
+	writeproductordie(gain, ULONG_MAX, line, cmd);
 	fclose(cmd);
 	free(line);
 }

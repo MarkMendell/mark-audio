@@ -251,7 +251,7 @@ main(int argc, char **argv)
 		chari += keylen;
 		if (chari++ == len)  // no command
 			continue;
-		if (strcasecmp(&line[chari], "off"))
+		if (!strcasecmp(&line[chari], "off"))
 			n->off = 1;
 		fprintf(n->w, "%u\t%s\n", cmdi - n->offset, &line[chari]);
 		if (ferror(n->w))

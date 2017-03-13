@@ -1,6 +1,7 @@
 #include <ctype.h>
 #include <errno.h>
 #include <limits.h>
+#include <signal.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -82,7 +83,7 @@ writesummedinputsordie(struct inputnode **headptr, unsigned long writeleft)
 		fwrite(sumbuf,sizeof(sample),(writeleft==ULONG_MAX)?maxread:writec,stdout);
 		if (ferror(stdout))
 			die(*headptr, "cue: fwrite: %s", strerror(errno));
-		if ((writeleft == -1) && ((*headptr)->next == NULL))
+		if ((writeleft == ULONG_MAX) && ((*headptr)->next == NULL))
 			break;
 		else if (writeleft != ULONG_MAX)
 			writeleft -= writec;
@@ -93,6 +94,7 @@ int
 main(int argc, char **argv)
 {
 	setbuf(stdout, NULL);
+	signal(SIGPIPE, SIG_DFL);
 
 	struct inputnode *head = malloc(sizeof(struct inputnode));  // list of inputs
 	if (head == NULL)

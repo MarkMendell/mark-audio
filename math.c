@@ -26,6 +26,7 @@ double div_(double a, double b) {
 	return a / b;
 }
 double mult(double a, double b) { return a * b; }
+double lt(double a, double b) { return a < b; }
 
 
 struct token {
@@ -46,7 +47,8 @@ struct token TOKENS[] = {
 	{ "-", { .f2 = sub }, 2 },
 	{ "*", { .f2 = mult }, 2 },
 	{ "/", { .f2 = div_ }, 2 },
-	{ "%", { .f2 = fmod }, 2 }
+	{ "%", { .f2 = fmod }, 2 },
+	{ "<", { .f2 = lt }, 2}
 };
 
 
