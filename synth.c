@@ -260,6 +260,7 @@ main(int argc, char **argv)
 	}
 	if (ferror(stdin))
 		die(head, line, "synth '%s': getline: %s", cmd, strerror(errno));
+	free(line);
 
 	// Send off to all the children
 	struct notenode *n = head;
@@ -267,7 +268,7 @@ main(int argc, char **argv)
 		if (!n->off) {
 			fprintf(n->w, "%u\toff\n", samplei);
 			if ((ferror(n->w)) && (errno != EPIPE))
-				die(head, line, "synth '%s': fprintf off to '%s' at %u: %s", cmd,
+				die(head, NULL, "synth '%s': fprintf off to '%s' at %u: %s", cmd,
 					n->key, samplei, strerror(errno));
 		}
 		n->off = 1;
@@ -275,7 +276,6 @@ main(int argc, char **argv)
 	}
 
 	// Read and write until all children are done, then cleanup
-	writesummednotesordie(&head, samplei, UINT_MAX/*( ͡° ͜ʖ ͡°)*/, line, cmd);
+	writesummednotesordie(&head, samplei, UINT_MAX/*( ͡° ͜ʖ ͡°)*/,NULL, cmd);
 	freenotelist(head);
-	free(line);
 }

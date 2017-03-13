@@ -1,6 +1,7 @@
 #include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -27,36 +28,46 @@ die(FILE *cmd, char *line, char *errfmt, ...)
 }
 
 void
-writeproductordie(double multiplier, int writeleft, char *line, FILE *cmd)
+writeproductordie(double gain, unsigned long writeleft, char *line, FILE *cmd)
 {
   sample buf[BUFLEN];
 	while (writeleft) {
-		size_t goal = ((writeleft==-1) || (writeleft>BUFLEN)) ? BUFLEN : writeleft;
+		size_t goal = (writeleft>BUFLEN) ? BUFLEN : writeleft;
 		ssize_t got;
 		do got = read(0, buf, goal); while ((got == -1) && (errno == EINTR));
 		if (got == -1)
 			die(cmd, line, "gain: read: %s", strerror(errno));
     for (size_t i=0; i<got; i++)
-      buf[i] = (sample)(((double)buf[i]) * multiplier);
+      buf[i] = (sample)(((double)buf[i]) * gain);
     fwrite(buf, 1, got, stdout);
 		if (ferror(stdout))
 			die(cmd, line, "gain: fwrite: %s", strerror(errno));
 		if (!got)
 			break;
-		if (writeleft != -1)
+		if (writeleft != UINT_MAX)
 			writeleft -= got;
   }
+}
+
+double
+parsegainordie(char *s, FILE *cmd, char *line)
+{
+	char *endptr;
+	double gain = (errno=0, strtod(s, &endptr));
+	if (errno)
+		die(cmd, line, "gain: strtod '%s': %s", s, strerror(errno));
+	if (!strlen(s) || (*endptr != '\0') || (gain < 0.0))
+		die(cmd, line, "gain: gain must be nonnegative number, not '%s'", s);
+	return gain;
 }
 
 int 
 main(int argc, char **argv)
 {
 	setbuf(stdout, NULL);
-	double multiplier = 1.0;
-	char *endptr;
-	if ((argc > 1) && (((multiplier = strtod(argv[1], &endptr)) < 0.0) ||
-			(!strlen(argv[1])) || (*endptr != '\0')))
-		die(NULL, NULL, "gain: multiplier must be nonnegative number");
+	double gain = 1.0;
+	if (argc > 1)
+		gain = parsegainordie(argv[1], NULL, NULL)
 	FILE *cmd;
 	if (fcntl(3, F_GETFD) == -1) {
 		if ((cmd = fopen("/dev/null", "r")) == NULL)
@@ -64,41 +75,38 @@ main(int argc, char **argv)
 	} else if ((cmd = fdopen(3, "r")) == NULL)
 		die(NULL, NULL, "gain: fdopen 3");
   
-	unsigned int samplei = 0;  // count of samples written
+	unsigned long samplei = 0;  // count of samples written
 	char *line = NULL;  // input command
 	ssize_t len;  // length of input command
 	size_t _;
+	// Read gain change lines and update after writing to that point
 	while ((len = getline(&line, &_, cmd)) != -1) {
-		// Parse line of format "index command"
 		if (line[len-1] != '\n')
 			die(cmd, line, "gain: got partial command (no newline): %s", line);
 		line[--len] = '\0';
-		unsigned int cuei = 0;  // when to start command
-		unsigned int chari = 0;
-		do
-			if (!isdigit(line[chari]))
-				die(cmd, line, "gain: lines must be 'index[\tcommand]', not: %s", line);
-			else
-				cuei = 10*cuei + (line[chari] - '0');
-		while ((++chari < len) && (!isspace(line[chari])));
+
+		// Parse next sample index to change gain
+		char *gainstr;
+		unsigned long cuei = (errno=0, strtoul(line, &gainstr, 10));
+		if (errno)
+			die(cmd, line, "gain: strtoul for '%s': %s", line, strerror(errno));
 		if (cuei < samplei)
 			die(cmd, line, "gain: command '%s' out of order", line);
 
 		// Write up to the next cue index
-		writeproductordie(multiplier, cuei - samplei, line, cmd);
+		writeproductordie(gain, cuei - samplei, line, cmd);
 		samplei = cuei;
-		if (chari++ == len)  // no command
+		if ((cmd++ - line) == len)  // no command
 			continue;
 
-		// Parse next multiplier
-		if (((multiplier = strtod(&line[chari], NULL)) < 0.0f) || (errno == EINVAL))
-			die(cmd, line, "gain: multiplier for '%s' not a nonnegative number", line);
+		// Parse next gain
+		gain = parsegainordie(gainstr, cmd, line);
 	}
 	if (ferror(cmd))
 		die(cmd, line, "gain: getline: %s", strerror(errno));
 
 	// Write remaining input and cleanup
-	writeproductordie(multiplier, -1, line, cmd);
+	writeproductordie(gain, UINT_MAX, line, cmd);
 	fclose(cmd);
 	free(line);
 }

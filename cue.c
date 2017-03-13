@@ -16,33 +16,20 @@ struct inputnode {
 };
 
 
-/* Clean up all elements of the input list pointed to by head. */
+/* printf args 3+ to stderr, then close all children listed in head (if not
+ * NULL) and exit with nonzero status. */
 void
-freeinputlist(struct inputnode *head)
-{
-	while (head->next) {
-		struct inputnode *nexthead = head->next;
-		free(head->line);
-		pclose(head->pipe);
-		free(head);
-		head = nexthead;
-	}
-	free(head);
-}
-
-/* printf args 3+ to stderr, then free the input list head (if not NULL) and
- * line and exit with nonzero status. */
-void
-die(struct inputnode *head, char *line, char *errfmt, ...)
+die(struct inputnode *head, char *errfmt, ...)
 {
 	va_list argp;
 	va_start(argp, errfmt);
 	vfprintf(stderr, errfmt, argp);
 	va_end(argp);
 	fputc('\n', stderr);
-	if (head)
-		freeinputlist(head);
-	free(line);
+	while (head && head->next) {
+		pclose(head->pipe);
+		head = head->next;
+	}
 	exit(EXIT_FAILURE);
 }
 
@@ -52,8 +39,7 @@ die(struct inputnode *head, char *line, char *errfmt, ...)
  * removed from the list. If all inputs reach EOF before count_end many samples
  * have been written, 0 is written for the remaining count. */
 void
-writesummedinputsordie(struct inputnode **headptr, unsigned long writeleft,
-		char *line)
+writesummedinputsordie(struct inputnode **headptr, unsigned long writeleft)
 {
 	sample readbuf[BUFLEN], sumbuf[BUFLEN];
 	// Output sum of inputs in increments of BUFLEN
@@ -67,13 +53,13 @@ writesummedinputsordie(struct inputnode **headptr, unsigned long writeleft,
 		while (input->next) {
 			size_t readc = fread(readbuf, sizeof(sample), writec, input->pipe);
 			if (ferror(input->pipe))
-				die(*headptr, line, "cue: fread for '%s': %s", input->line,
+				die(*headptr, "cue: fread for '%s': %s", input->line,
 					strerror(errno));
 			// End of input, remove it from list
 			if (feof(input->pipe)) {
 				int status = pclose(input->pipe);
 				if (status == -1)
-					die(*headptr, line, "cue: pclose pipe for '%s': %s", input->line,
+					die(*headptr, "cue: pclose pipe for '%s': %s", input->line,
 						strerror(errno));
 				if (status)
 					fprintf(stderr, "cue: '%s' exited with status %d\n", input->line,
@@ -95,7 +81,7 @@ writesummedinputsordie(struct inputnode **headptr, unsigned long writeleft,
 		// Output the summed inputs
 		fwrite(sumbuf,sizeof(sample),(writeleft==ULONG_MAX)?maxread:writec,stdout);
 		if (ferror(stdout))
-			die(*headptr, line, "cue: fwrite: %s", strerror(errno));
+			die(*headptr, "cue: fwrite: %s", strerror(errno));
 		if ((writeleft == -1) && ((*headptr)->next == NULL))
 			break;
 		else if (writeleft != ULONG_MAX)
@@ -110,7 +96,7 @@ main(int argc, char **argv)
 
 	struct inputnode *head = malloc(sizeof(struct inputnode));  // list of inputs
 	if (head == NULL)
-		die(NULL, NULL, "cue: malloc head: %s", strerror(errno));
+		die(NULL, "cue: malloc head: %s", strerror(errno));
 	head->next = NULL;
 	unsigned long samplei = 0;  // count of samples written
 	char *line = NULL;  // input command
@@ -119,19 +105,19 @@ main(int argc, char **argv)
 	// Execute each input line at its timestamp, summing old commands inbetween
 	while ((len = getline(&line, &_, stdin)) != -1) {
 		if (line[len-1] != '\n')
-			die(head, line, "cue: got partial command (no newline): %s", line);
+			die(head, "cue: got partial command (no newline): %s", line);
 		line[--len] = '\0';
 
 		// Parse index for cue
 		char *cmd;
 		unsigned long cuei = (errno=0, strtoul(line, &cmd, 10));
 		if (errno)
-			die(head, line, "cue: strtoul for cue '%s': %s", line, strerror(errno));
+			die(head, "cue: strtoul for cue '%s': %s", line, strerror(errno));
 		if (cuei < samplei)
-			die(head, line, "cue: cue '%s' out of order", line);
+			die(head, "cue: cue '%s' out of order", line);
 
 		// Write up to the next cue index
-		writesummedinputsordie(&head, cuei - samplei, line);
+		writesummedinputsordie(&head, cuei - samplei);
 		samplei = cuei;
 		if ((cmd++ - line) == len)  // no command
 			continue;
@@ -139,26 +125,18 @@ main(int argc, char **argv)
 		// Run command in a subprocess and add it to our list of inputs
 		struct inputnode *oldhead = head;
 		if ((head = malloc(sizeof(struct inputnode))) == NULL)
-			die(oldhead, line, "cue: malloc new input %u: %s", cuei, strerror(errno));
-		if ((head->line = malloc(len+1)) == NULL) {
-			char *errmsg = strerror(errno);
-			free(head);
-			die(oldhead, line, "cue: malloc line '%s': %s", line, errmsg);
-		}
+			die(oldhead, "cue: malloc new input %u: %s", cuei, strerror(errno));
+		if ((head->line = malloc(len+1)) == NULL)
+			die(oldhead, "cue: malloc line '%s': %s", line, strerror(errno));
 		head->next = oldhead;
 		strcpy(head->line, line);
-		if (errno=0, (head->pipe = popen(cmd, "r")) == NULL) {
-			char *errmsg = errno ? strerror(errno) : "unknown popen error";
-			free(head->line);
-			free(head);
-			die(oldhead, line, "cue: popen for '%s': %s", line, errmsg);
-		}
+		if (errno=0, (head->pipe = popen(cmd, "r")) == NULL)
+			die(oldhead, "cue: popen for '%s': %s", line, errno ? strerror(errno) :
+				"unknown popen error");
 	}
 	if (ferror(stdin))
-		die(head, line, "cue: getline: %s", strerror(errno));
+		die(head, "cue: getline: %s", strerror(errno));
 
-	// Write the remaining input and clean up
-	writesummedinputsordie(&head, ULONG_MAX, line);
-	freeinputlist(head);
-	free(line);
+	// Write the remaining input
+	writesummedinputsordie(&head, ULONG_MAX);
 }

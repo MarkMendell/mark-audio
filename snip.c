@@ -35,12 +35,10 @@ freadordie(sample *buf, size_t count)
 int
 main(int argc, char **argv)
 {
-	int channels, start;
-	if ((argc < 3) || (argc > 4))
+	int start;
+	if ((argc < 2) || (argc > 3))
 		die("usage: snip channels start [end]");
 	char *endptr;
-	if (((channels = strtol(argv[1], &endptr, 10)) <= 0) || (endptr == argv[1]))
-		die("snip: channels must be positive integer");
 	if (((start = strtol(argv[2], &endptr, 10)) < 0) || (endptr == argv[2]))
 		die("snip: start must be nonnegative integer");
 	int end = -1;
@@ -48,20 +46,17 @@ main(int argc, char **argv)
 			(((end = strtol(argv[3], &endptr, 10)) <= start) || (endptr == argv[3])))
 		die("snip: end must be integer after start");
 
-	unsigned int buflen = BUFLEN-1;
-	while (++buflen % channels)
-		;
-	sample buf[buflen];
+	sample buf[BUFLEN];
 	unsigned int i = 0;
 	// Ignore to start
 	while (i < start) {
 		size_t left = (start - i)*channels;
-		i += freadordie(buf, (left > buflen) ? buflen : left);
+		i += freadordie(buf, (left > BUFLEN) ? BUFLEN : left);
 	}
 	// Read & write to end
 	while ((end == -1) || (i < end)) {
 		size_t left = (end - i)*channels;
-		size_t read = freadordie(buf, (left > buflen) ? buflen : left);
+		size_t read = freadordie(buf, (left > BUFLEN) ? BUFLEN : left);
 		fwrite(buf, sizeof(sample), read, stdout);
 		if (ferror(stdout))
 			die("snip: fwrite: %s", strerror(errno));

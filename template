@@ -7,19 +7,18 @@
 
 
 typedef int16_t sample;
-unsigned int BUFLEN = 4096/sizeof(sample);
+size_t BUFLEN = 4096/sizeof(sample);
 
 
-/* printf args 3+ to stderr, then free the line and exit with nonzero status. */
+/* printf args 2+ to stderr and exit with nonzero status. */
 void
-die(char *line, char *errfmt, ...)
+die(char *errfmt, ...)
 {
 	va_list argp;
 	va_start(argp, errfmt);
 	vfprintf(stderr, errfmt, argp);
 	va_end(argp);
 	fputc('\n', stderr);
-	free(line);
 	exit(EXIT_FAILURE);
 }
 
@@ -32,30 +31,26 @@ main(int argc, char **argv)
 	char *line = NULL;  // input command
 	ssize_t len;  // length of input command
 	size_t _;
+	// <Description of how each line is processed>
 	while ((len = getline(&line, &_, stdin)) != -1) {
-		// Parse line of format "index command"
 		if (line[len-1] != '\n')
-			die(line, "CMD: got partial command (no newline): %s", line);
+			die("CMD: got partial command (no newline): %s", line);
 		line[--len] = '\0';
-		unsigned int cmdi = 0;  // when to start command
-		unsigned int chari = 0;
-		do
-			if (!isdigit(line[chari]))
-				die(line, "CMD: lines must be 'index[\tcommand]', not: %s", line);
-			else
-				cmdi = 10*cmdi + (line[chari] - '0');
-		while ((++chari < len) && (!isspace(line[chari])));
+	
+		// Parse next sample index to <take action>
+		char *cmd;
+		unsigned long cmdi = (errno=0, strtoul(line, &cmd, 10));
+		if (errno)
+			die("CMD: strtoul for cue '%s': %s", line, strerror(errno));
 		if (cmdi < samplei)
-			die(line, "CMD: command '%s' out of order", line);
+			die("CMD: command '%s' out of order", line);
 
 		// Write up to the next cmd index
 		/* code here */
 		samplei = cmdi;
-		if (chari++ == len)  // no command
+		if ((cmd++ - line) == len)  // no command
 			continue;
 	}
 	if (ferror(stdin))
-		die(line, "CMD: getline: %s", strerror(errno));
-
-	free(line);
+		die("CMD: getline: %s", strerror(errno));
 }
